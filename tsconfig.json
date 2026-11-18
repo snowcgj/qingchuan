@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  "include": ["app/page.tsx", "local-client.tsx", "lib/browser-crypto.ts", "lib/transfer.ts", "lib/signaling.ts", "vite.local.config.ts"]
+}

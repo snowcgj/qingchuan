@@ -1,0 +1,19 @@
+# Installed dependencies and generated files are not repository source.
+/node_modules/
+/dist-local/
+/dist/
+/release/
+/runtime/
+/.runtime/
+/work/
+/outputs/
+/coverage/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+.env*
+.dev.vars*
+*.pem
+.DS_Store
+Thumbs.db
+/output/

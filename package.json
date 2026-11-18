@@ -1,0 +1,40 @@
+{
+  "name": "qingchuan",
+  "version": "0.1.0",
+  "description": "电脑与手机扫码连接，在局域网双向传照片，无需手机 App。",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "dev": "vite --config vite.local.config.ts",
+    "build": "vite build --config vite.local.config.ts",
+    "build:local": "npm run build",
+    "start": "node --disable-warning=ExperimentalWarning scripts/local-server.mjs",
+    "start:local": "npm start",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/http-downloads.mjs",
+    "test:browser": "node tests/e2e.mjs && node tests/bidirectional.mjs && node tests/relay-security.mjs",
+    "package:portable": "node scripts/package-portable.mjs",
+    "package:source": "node scripts/package-source.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "fflate": "0.8.3",
+    "lucide-react": "1.31.0",
+    "qrcode": "1.5.4",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "22.19.19",
+    "@types/qrcode": "1.5.6",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "esbuild": "0.28.0",
+    "typescript": "5.9.3",
+    "vite": "8.0.13"
+  }
+}
