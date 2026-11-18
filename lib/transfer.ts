@@ -36,7 +36,7 @@ export class Transfer {
     this.startConnectionTimeout();
   }
   waitForScan(){clearTimeout(this.channelTimer);this.channelTimer=undefined;}
-  releaseReceived(){this.retained=0;}
+  releaseReceived(bytes=Infinity){this.retained=Math.max(0,this.retained-bytes);}
   startConnectionTimeout(){if(this.channelTimer)return;this.channelTimer=setTimeout(()=>{if(this.channel?.readyState!=='open'&&!this.closed){this.emit({kind:'error',text:'连接超时。请确认两台设备在同一 Wi-Fi 或热点下，再重新配对。'});this.close();}},90000);}
   private bind(channel:RTCDataChannel|WebSocket){
     this.channel=channel;channel.binaryType='arraybuffer';if('bufferedAmountLowThreshold' in channel)channel.bufferedAmountLowThreshold=256*1024;

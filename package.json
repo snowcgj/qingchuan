@@ -13,7 +13,7 @@
     "start:local": "npm start",
     "check": "tsc --noEmit",
     "test": "node --test tests/http-downloads.mjs",
-    "test:browser": "node tests/e2e.mjs && node tests/bidirectional.mjs && node tests/relay-security.mjs",
+    "test:browser": "node tests/e2e.mjs && node tests/bidirectional.mjs && node tests/photo-removal.mjs && node tests/relay-security.mjs",
     "package:portable": "node scripts/package-portable.mjs",
     "package:source": "node scripts/package-source.mjs"
   },

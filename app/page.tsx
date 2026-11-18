@@ -7,6 +7,7 @@ import {ArrowUpRight,ArrowDownToLine,Check,CheckCheck,ChevronRight,Copy,ImagePlu
 import {Transfer,MAX_FILE,MAX_TOTAL,type Received,type Event} from '../lib/transfer';
 type Room={id:string;receiver:string;sender:string;expires:number};
 type Item={id:string;file:File;url:string;status:'waiting'|'sending'|'done'|'error';error?:string};
+type Removed={index:number}&({kind:'queue';item:Item}|{kind:'received';item:Received});
 const size=(n:number)=>n<1024*1024?`${Math.max(1,Math.round(n/1024))} KB`:`${(n/1024/1024).toFixed(1)} MB`;
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function api(path:string,token?:string,method='GET',body?:unknown){
@@ -37,6 +38,8 @@ export default function Home(){
   const [progress,setProgress]=useState<{name:string;loaded:number;total:number}|null>(null);
   const [incoming,setIncoming]=useState<{name:string;loaded:number;total:number}|null>(null);
   const [downloadNotice,setDownloadNotice]=useState('');
+  const [removed,setRemoved]=useState<Removed|null>(null);
+  const removal=useRef<Removed|null>(null),removalTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const transfer=useRef<Transfer|null>(null),currentRoom=useRef<Room|null>(null),generation=useRef(0);
   const heldFiles=useRef<Received[]>([]),heldQueue=useRef<Item[]>([]),sendingLock=useRef(false),input=useRef<HTMLInputElement>(null);
   const join=useRef<{id:string;token:string}|null>(null);
@@ -49,10 +52,11 @@ export default function Home(){
   useEffect(()=>{
     const readPairing=()=>{
       const target=new URLSearchParams(location.hash.slice(1)).get('send');
-      if(!target){if(join.current){generation.current++;transfer.current?.close();join.current=null;setConnected(false);setBusy(false);setMode('receive');}return;}
+      if(!target){if(join.current){finishRemoval();generation.current++;transfer.current?.close();join.current=null;setConnected(false);setBusy(false);setMode('receive');}return;}
       const [id,token]=target.split('.');setMode('send');
       if(!/^[a-f0-9-]{36}$/.test(id)||! /^[a-f0-9]{64}$/.test(token||'')){setError('二维码链接不完整，请重新扫码');return;}
       if(join.current?.id===id&&join.current.token===token)return;
+      finishRemoval();
       generation.current++;transfer.current?.close();join.current={id,token};setConnected(false);setBusy(false);setError('');setProgress(null);setIncoming(null);setPanel('send');setStatus('准备连接电脑');
       heldQueue.current=heldQueue.current.map(item=>({...item,status:'waiting',error:undefined}));setQueue(heldQueue.current);
     };
@@ -63,19 +67,59 @@ export default function Home(){
       if(mounted&&data?.local&&data.origins){setLocalRelay(data.transport==='websocket');setLocalOrigins(data.origins);setPairOrigin(data.origins.find(n=>n.origin===location.origin)?.origin||data.origins[0]?.origin||location.origin);}
     }).catch(()=>{}).finally(()=>{if(mounted)setReady(true)});
     const timer=setInterval(()=>setNow(Date.now()),1000);
-    const warn=(e:BeforeUnloadEvent)=>{if(heldFiles.current.length||sendingLock.current){e.preventDefault();e.returnValue='';}};
+    const warn=(e:BeforeUnloadEvent)=>{if(heldFiles.current.length||removal.current?.kind==='received'||sendingLock.current){e.preventDefault();e.returnValue='';}};
     window.addEventListener('beforeunload',warn);
-    return()=>{mounted=false;clearInterval(timer);window.removeEventListener('hashchange',readPairing);window.removeEventListener('beforeunload',warn);generation.current++;transfer.current?.close();heldFiles.current.forEach(f=>URL.revokeObjectURL(f.url));heldQueue.current.forEach(f=>URL.revokeObjectURL(f.url));};
+    return()=>{mounted=false;clearInterval(timer);clearTimeout(removalTimer.current);if(removal.current)URL.revokeObjectURL(removal.current.item.url);removal.current=null;window.removeEventListener('hashchange',readPairing);window.removeEventListener('beforeunload',warn);generation.current++;transfer.current?.close();heldFiles.current.forEach(f=>URL.revokeObjectURL(f.url));heldQueue.current.forEach(f=>URL.revokeObjectURL(f.url));};
   },[]);
   function updateQueue(next:Item[]){heldQueue.current=next;setQueue(next);}
+  function finishRemoval(){
+    const pending=removal.current;if(!pending)return;
+    clearTimeout(removalTimer.current);removal.current=null;setRemoved(null);
+    URL.revokeObjectURL(pending.item.url);
+    if(pending.kind==='received')transfer.current?.releaseReceived(pending.item.size);
+  }
+  function offerUndo(pending:Removed){
+    finishRemoval();removal.current=pending;setRemoved(pending);
+    removalTimer.current=setTimeout(finishRemoval,5000);
+  }
+  function removeQueued(id:string){
+    if(sendingLock.current)return;
+    const index=heldQueue.current.findIndex(item=>item.id===id);if(index<0)return;
+    offerUndo({kind:'queue',item:heldQueue.current[index],index});
+    updateQueue(heldQueue.current.filter(item=>item.id!==id));
+  }
+  function removeReceived(id:string){
+    if(packing)return;
+    const index=heldFiles.current.findIndex(item=>item.id===id);if(index<0)return;
+    offerUndo({kind:'received',item:heldFiles.current[index],index});
+    heldFiles.current=heldFiles.current.filter(item=>item.id!==id);setFiles(heldFiles.current);setDownloadNotice('');
+  }
+  function undoRemoval(){
+    const pending=removal.current;if(!pending)return;
+    if(pending.kind==='queue'){
+      if(sendingLock.current)return;
+      if(heldQueue.current.length>=100||heldQueue.current.reduce((n,item)=>n+item.file.size,0)+pending.item.file.size>MAX_TOTAL){setError('发送列表已满，请先移除其他照片后再撤销');return;}
+      const next=[...heldQueue.current];next.splice(pending.index,0,pending.item);updateQueue(next);
+    }else{
+      const next=[...heldFiles.current];next.splice(pending.index,0,pending.item);heldFiles.current=next;setFiles(next);
+    }
+    clearTimeout(removalTimer.current);removal.current=null;setRemoved(null);
+  }
+  function clearReceived(){
+    if(!confirm('确认已经保存需要的照片？清空后不能恢复。'))return;
+    if(removal.current?.kind==='received')finishRemoval();
+    files.forEach(f=>URL.revokeObjectURL(f.url));heldFiles.current=[];setFiles([]);setDownloadNotice('');transfer.current?.releaseReceived();
+  }
   function clearDelivered(){
     if(sendingLock.current)return;
+    if(removal.current?.kind==='queue')finishRemoval();
     const completed=heldQueue.current.filter(item=>item.status==='done');
     updateQueue(heldQueue.current.filter(item=>item.status!=='done'));
     completed.forEach(item=>URL.revokeObjectURL(item.url));
     if(connected)setStatus('手机和电脑已连接，可以继续传照片');
   }
   async function receive(){
+    finishRemoval();
     const gen=++generation.current;transfer.current?.close();setConnected(false);setError('');setQr('');setLink('');setBusy(true);setProgress(null);setIncoming(null);setStatus('正在准备二维码…');
     try{
       const old=currentRoom.current;if(old) await api(`/api/rooms/${old.id}`,old.receiver,'DELETE').catch(()=>{});
@@ -97,6 +141,7 @@ export default function Home(){
   }
   async function connect(){
     if(!join.current)return;const gen=++generation.current;
+    finishRemoval();
     transfer.current?.close();setBusy(true);setConnected(false);setError('');setStatus('正在连接电脑…');
     try{
       const {id,token}=join.current,state=await api(`/api/rooms/${id}`,token);
@@ -117,7 +162,7 @@ export default function Home(){
     updateQueue(next);if(messages.length)setError(messages.join('；'));if(input.current)input.current.value='';
   }
   async function send(){
-    if(sendingLock.current)return;sendingLock.current=true;setSending(true);setError('');const t=transfer.current;
+    if(sendingLock.current)return;if(removal.current?.kind==='queue')finishRemoval();sendingLock.current=true;setSending(true);setError('');const t=transfer.current;
     try{
       if(!t||!connected)throw new Error('请先连接对方设备');
       for(const item of heldQueue.current.filter(i=>i.status!=='done')){
@@ -169,12 +214,12 @@ export default function Home(){
     </div>:<>
       <div className="received-summary"><span><Check size={15}/>已收到 {files.length} 张 · {size(total)}</span><span>请下载后再关闭页面</span></div>
       <div className="photo-grid">{files.map(file=><article className="photo-card" key={file.id}>
-        <div className="photo-preview">{file.downloadPath?<a className="photo-preview-link" href={file.downloadPath+'?view=1'} target="_blank" rel="noopener noreferrer" title={`打开原图 ${file.name}`}><img src={file.url} alt={file.name} onError={e=>{e.currentTarget.style.display='none'}}/></a>:<img src={file.url} alt={file.name} onError={e=>{e.currentTarget.style.display='none'}}/>}<span className="photo-fallback"><Images size={28}/></span></div>
+        <div className="photo-preview">{file.downloadPath?<a className="photo-preview-link" href={file.downloadPath+'?view=1'} target="_blank" rel="noopener noreferrer" title={`打开原图 ${file.name}`}><img src={file.url} alt={file.name} onError={e=>{e.currentTarget.style.display='none'}}/></a>:<img src={file.url} alt={file.name} onError={e=>{e.currentTarget.style.display='none'}}/>}<span className="photo-fallback"><Images size={28}/></span><button className="item-remove photo-remove" aria-label={`移除 ${file.name}`} title="从接收列表移除，不影响原文件" onClick={()=>removeReceived(file.id)} disabled={packing}><X size={17}/></button></div>
         <div className="photo-info"><div><strong title={file.name}>{file.name}</strong><span>{size(file.size)}</span></div>{file.downloadPath?<a className={isPhone?'photo-download':'icon-button'} title={`下载 ${file.name}`} href={fileDownloadUrl(file)} download={safeName(file.name)}><ArrowDownToLine size={17}/>{isPhone&&'下载'}</a>:<button className={isPhone?'photo-download':'icon-button'} title={`下载 ${file.name}`} onClick={()=>save(file.blob,safeName(file.name))}><ArrowDownToLine size={17}/>{isPhone&&'下载'}</button>}</div>
       </article>)}</div>
       {isPhone&&<p className="save-hint">点「下载」后请确认浏览器的保存提示；也可点击预览图打开原图，再长按保存。临时下载链接 15 分钟有效，保存位置取决于手机浏览器。</p>}
       {downloadNotice&&<p className="download-notice" role="status">{downloadNotice}</p>}
-      <button className="clear-button" onClick={()=>{if(confirm('确认已经保存需要的照片？清空后不能恢复。')){files.forEach(f=>URL.revokeObjectURL(f.url));heldFiles.current=[];setFiles([]);setDownloadNotice('');transfer.current?.releaseReceived();}}}>清空已接收照片</button>
+      <button className="clear-button" onClick={clearReceived} disabled={packing}>清空已接收照片</button>
     </>}
     <div className="inbox-foot"><ShieldCheck size={15}/><span>照片暂存在当前页面，网站不保存照片。下载后再关闭。</span></div>
   </section>;
@@ -189,7 +234,7 @@ export default function Home(){
       <div className="queue">{queue.map(item=><div className="queue-item" key={item.id}>
         <div className="queue-thumbnail"><img src={item.url} alt="" onError={e=>{e.currentTarget.style.display='none'}}/><Images size={20}/></div>
         <div className="queue-text"><strong>{item.file.name}</strong><span className={item.status==='error'?'error-text':''}>{item.status==='done'?`${other}已完整收到`:item.status==='sending'?progress?.name===item.file.name?(percent===100?`等待${other}校验…`:`发送中 ${percent}%`):'正在准备照片…':item.status==='error'?item.error:size(item.file.size)}</span></div>
-        {item.status==='done'?<Check size={19} className="success-icon"/>:item.status==='sending'?<LoaderCircle size={18} className="spin"/>:<button className="icon-button" disabled={sending} aria-label={`移除 ${item.file.name}`} onClick={()=>{URL.revokeObjectURL(item.url);updateQueue(queue.filter(i=>i.id!==item.id))}}><X size={17}/></button>}
+        <div className="queue-item-actions">{item.status==='done'?<Check size={19} className="success-icon"/>:item.status==='sending'?<LoaderCircle size={18} className="spin"/>:null}<button className="item-remove" disabled={sending} aria-label={`移除 ${item.file.name}`} title={sending?'发送中暂不能移除':'从发送列表移除，不影响原文件'} onClick={()=>removeQueued(item.id)}><X size={17}/></button></div>
       </div>)}</div>
     </>}
     {queue.some(item=>item.status==='done')&&<div className="queue-actions"><button className="button secondary small" onClick={clearDelivered} disabled={sending}>清除已送达</button></div>}
@@ -239,6 +284,7 @@ export default function Home(){
       {error&&<div className="error-banner" role="alert"><span>{error}</span><button aria-label="关闭提示" onClick={()=>setError('')}><X size={17}/></button></div>}
       <div className="principles"><span><ShieldCheck size={17}/>照片不在服务器留存</span><span><Images size={17}/>不额外压缩画质</span><span><Wifi size={17}/>同一网络，连接更顺畅</span></div>
     </main>
+    {removed&&<div className="removal-toast" role="status"><div><strong>已从{removed.kind==='queue'?'发送':'接收'}列表移除</strong><span>{removed.kind==='queue'?removed.item.file.name:removed.item.name}</span></div><button onClick={undoRemoval}>撤销</button><button className="toast-dismiss" aria-label="关闭移除提示" onClick={finishRemoval}><X size={17}/></button></div>}
     <footer><span>轻传 · 让照片少绕一点路</span><span>KEEP IT SIMPLE. KEEP IT CLOSE.</span></footer>
   </div>;
 }
