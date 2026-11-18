@@ -5,8 +5,8 @@ import {outputFolder,zipDirectory,directoryBytes,copyTree} from './package-utils
 
 const root=fileURLToPath(new URL('../',import.meta.url)),pkg=JSON.parse(readFileSync(path.join(root,'package.json'),'utf8'));
 const output=outputFolder('source'),name=`qingchuan-${pkg.version}-source`,bundle=path.join(output,name);mkdirSync(bundle,{recursive:true});
-const files=['README.md','.gitignore','.npmrc','package.json','package-lock.json','tsconfig.json','vite.local.config.ts','postcss.config.mjs','index.html','local-client.tsx','启动轻传.cmd','停止轻传.cmd'];
-const directories=['app','lib','db','public','scripts','tests'];
+const files=['README.md','AGENTS.md','.gitignore','.npmrc','package.json','package-lock.json','tsconfig.json','vite.local.config.ts','postcss.config.mjs','index.html','local-client.tsx','启动轻传.cmd','停止轻传.cmd'];
+const directories=['app','lib','db','public','scripts','tests','docs'];
 for(const file of files)copyFileSync(path.join(root,file),path.join(bundle,file));
 for(const directory of directories)copyTree(path.join(root,directory),path.join(bundle,directory));
 for(const file of ['app/page.tsx','scripts/local-server.mjs','db/schema.sql'])statSync(path.join(bundle,file));

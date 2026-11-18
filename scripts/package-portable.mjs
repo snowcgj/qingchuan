@@ -17,6 +17,9 @@ const output=outputFolder('portable'),name=`qingchuan-${pkg.version}-windows-x64
 for(const folder of ['scripts','runtime','db'])mkdirSync(path.join(bundle,folder),{recursive:true});
 await build({entryPoints:[path.join(root,'scripts/local-server.mjs')],outfile:path.join(bundle,'scripts/local-server.mjs'),bundle:true,platform:'node',format:'esm',target:'node22',minify:true,legalComments:'inline',external:['bufferutil','utf-8-validate'],banner:{js:"import {createRequire as __createRequire} from 'node:module';const require=__createRequire(import.meta.url);"}});
 copyTree(path.join(root,'dist-local'),path.join(bundle,'dist-local'));
+copyTree(path.join(root,'docs'),path.join(bundle,'docs'));
+mkdirSync(path.join(bundle,'public'),{recursive:true});
+copyFileSync(path.join(root,'public/favicon.svg'),path.join(bundle,'public/favicon.svg'));
 if(!existsSync(path.join(bundle,'dist-local/index.html')))throw new Error('Portable web assets missing.');
 copyFileSync(runtime,path.join(bundle,'runtime/node.exe'));
 for(const file of ['scripts/start-local.ps1','scripts/stop-local.ps1','启动轻传.cmd','停止轻传.cmd','db/schema.sql','README.md'])copyFileSync(path.join(root,file),path.join(bundle,file));
