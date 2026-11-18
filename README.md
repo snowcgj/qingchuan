@@ -44,7 +44,7 @@
 
 ### 使用 Windows 便携版
 
-> 便携包已完成本地打包与隔离目录验证，**GitHub Release 尚未发布**。当前可先使用下方的源码运行方式；发布后将在[版本页面](https://github.com/snowcgj/qingchuan/releases)提供下载。
+**[下载 Windows x64 便携版 v0.1.0](https://github.com/snowcgj/qingchuan/releases/download/v0.1.0/qingchuan-0.1.0-windows-x64.zip)** · [版本说明与校验文件](https://github.com/snowcgj/qingchuan/releases/tag/v0.1.0)
 
 拿到便携 ZIP 后，只需三步：
 
