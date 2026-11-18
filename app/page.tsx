@@ -10,6 +10,7 @@ type Item={id:string;file:File;url:string;status:'waiting'|'sending'|'done'|'err
 type Removed={index:number}&({kind:'queue';item:Item}|{kind:'received';item:Received});
 const size=(n:number)=>n<1024*1024?`${Math.max(1,Math.round(n/1024))} KB`:`${(n/1024/1024).toFixed(1)} MB`;
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+const isPhoto=(file:File)=>file.type.startsWith('image/')||/\.(heic|heif|jpg|jpeg|png|gif|webp|avif|bmp)$/i.test(file.name);
 async function api(path:string,token?:string,method='GET',body?:unknown){
   const response=await fetch(path,{method,headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000),cache:'no-store'});
   const data=await response.json() as Room & {error?:string;offer?:RTCSessionDescriptionInit;answer?:RTCSessionDescriptionInit;claimed?:boolean};if(!response.ok)throw new Error(data.error||'请求失败，请稍后重试');return data;
@@ -38,6 +39,7 @@ export default function Home(){
   const [progress,setProgress]=useState<{name:string;loaded:number;total:number}|null>(null);
   const [incoming,setIncoming]=useState<{name:string;loaded:number;total:number}|null>(null);
   const [downloadNotice,setDownloadNotice]=useState('');
+  const [pasteNotice,setPasteNotice]=useState('');
   const [removed,setRemoved]=useState<Removed|null>(null);
   const removal=useRef<Removed|null>(null),removalTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const transfer=useRef<Transfer|null>(null),currentRoom=useRef<Room|null>(null),generation=useRef(0);
@@ -151,15 +153,28 @@ export default function Home(){
       await api(`/api/rooms/${id}/answer`,token,'POST',answer);
     }catch(e){if(gen===generation.current){transfer.current?.close();setError((e as Error).message);setBusy(false);setStatus('连接未能建立');}}
   }
-  function select(selected:FileList|null){
-    if(!selected||sendingLock.current)return;setError('');const next=[...heldQueue.current],messages:string[]=[];
+  function select(selected:FileList|File[]|null){
+    if(!selected||sendingLock.current)return 0;setError('');setPasteNotice('');const next=[...heldQueue.current],messages:string[]=[],previousCount=next.length;
     for(const file of Array.from(selected)){
-      if(!file.type.startsWith('image/')&&!/\.(heic|heif|jpg|jpeg|png|gif|webp|avif|bmp)$/i.test(file.name)){messages.push(`${file.name} 不是支持的照片`);continue;}
+      if(!isPhoto(file)){messages.push(`${file.name} 不是支持的照片`);continue;}
       if(file.size===0||file.size>MAX_FILE){messages.push(`${file.name} 超出单张 50 MB 限制或为空`);continue;}
       if(next.length>=100||next.reduce((n,i)=>n+i.file.size,0)+file.size>MAX_TOTAL){messages.push('每批最多 100 张、合计 200 MB');break;}
       next.push({id:randomId(),file,url:URL.createObjectURL(file),status:'waiting'});
     }
     updateQueue(next);if(messages.length)setError(messages.join('；'));if(input.current)input.current.value='';
+    return next.length-previousCount;
+  }
+  function pastePhotos(event:ClipboardEvent){
+    const target=event.target;
+    if(isPhone||!showingSend||(target instanceof Element&&target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')))return;
+    const data=event.clipboardData;if(!data)return;
+    const pasted=data.files.length?Array.from(data.files):Array.from(data.items).map(item=>item.kind==='file'?item.getAsFile():null).filter((file):file is File=>file!==null);
+    const photos=pasted.filter(isPhoto);
+    if(!photos.length){setPasteNotice('剪贴板中没有可读取的图片。请复制截图或图片内容，也可以直接拖入图片。');return;}
+    event.preventDefault();
+    if(sendingLock.current){setPasteNotice('正在发送，请等本批照片发送结束后再粘贴。');return;}
+    const added=select(photos);
+    setPasteNotice(added?`已粘贴 ${added} 张图片，确认后点击发送。`:'未添加图片，请检查文件大小或列表数量限制。');
   }
   async function send(){
     if(sendingLock.current)return;if(removal.current?.kind==='queue')finishRemoval();sendingLock.current=true;setSending(true);setError('');const t=transfer.current;
@@ -196,6 +211,10 @@ export default function Home(){
   const phoneBatch=isPhone&&files.length>1,archiveUrl=archiveDownloadUrl(files);
   const zipLabel=phoneBatch?'打包下载（ZIP）':'打包下载';
   const showingSend=localRelay?panel==='send':isPhone;
+  useEffect(()=>{
+    document.addEventListener('paste',pastePhotos);
+    return()=>document.removeEventListener('paste',pastePhotos);
+  },[isPhone,showingSend]);
   const inbox=<section className="inbox card">
     <div className="section-top">
       <div><span className="step-label">02 / 接收照片</span><h2>你的照片收件箱 <span className="count">{files.length}</span></h2></div>
@@ -227,8 +246,9 @@ export default function Home(){
     <div className="section-top"><span className="step-label">02 / 选择并发送</span><Images size={20}/></div>
     <input ref={input} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={e=>select(e.target.files)}/>
     <button className="choose-area" onClick={()=>input.current?.click()} disabled={sending} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();select(e.dataTransfer.files)}}>
-      <span><ImagePlus size={30}/></span><strong>{queue.length?'继续添加照片':isPhone?'选择手机里的照片':'选择电脑里的照片'}</strong><p>{isPhone?'支持多选':'支持多选，也可拖入照片'} · 单张最多 50 MB</p>
+      <span><ImagePlus size={30}/></span><strong>{queue.length?'继续添加照片':isPhone?'选择手机里的照片':'选择电脑里的照片'}</strong><p>{isPhone?'支持多选':'支持选图、拖入或 Ctrl+V 粘贴图片'} · 单张最多 50 MB</p>
     </button>
+    {!isPhone&&pasteNotice&&<p className="paste-notice" role="status">{pasteNotice}</p>}
     {queue.length>0&&<>
       <div className="queue-summary"><span>已选 {queue.length} 张 · {size(queue.reduce((n,i)=>n+i.file.size,0))}</span><span>{queue.filter(i=>i.status==='done').length} 张已送达</span></div>
       <div className="queue">{queue.map(item=><div className="queue-item" key={item.id}>
